@@ -1,0 +1,76 @@
+services:
+
+  # ── 1. Ollama LLM server ────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Use default CMD (ollama serve) — pull handled by ollama-pull service
+    healthcheck:
+      test: [ "CMD", "ollama", "list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ── 2. Pull phi3 model (runs once, exits) ───────────────────────────────────
+  ollama-pull:
+    image: ollama/ollama
+    container_name: ollama-pull
+    entrypoint: [ "ollama", "pull", "phi3" ]
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  # ── 3. Data init (runs llm_gen.py only if CSV is missing) ──────────────────
+  data-init:
+    build: .
+    container_name: data-init
+    command: sh entrypoint.sh
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    restart: "no" # exits after CSV is ready — intentional
+
+  # ── 4. FastAPI backend ──────────────────────────────────────────────────────
+  backend:
+    build: .
+    container_name: backend
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - app_data:/app/data:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+
+  # ── 5. Streamlit frontend ───────────────────────────────────────────────────
+  frontend:
+    build: .
+    container_name: frontend
+    command: streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - app_data:/app/data:ro
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+
+volumes:
+  ollama_data: # persists downloaded Ollama models across restarts
+  app_data: # persists generated sample_data.csv and profiles.json
