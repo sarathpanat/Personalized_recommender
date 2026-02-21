@@ -1,0 +1,18 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# User profiles (runtime state, not source code)
+frontend/profiles.json
+
+# Environment
+.env
+
+# Logs
+*.log
